@@ -89,11 +89,22 @@ def main():
     if 'div_flow' in network_data.keys():
         args.div_flow = network_data['div_flow']
     
+    count = 0
     for (img1_file, img2_file) in tqdm(img_pairs):
+        count = count + 1
         im1_raw = imread(img1_file)
         im2_raw = imread(img2_file)
+        folder_name = save_path + str(count)
+
+        if(not os.path.exists(folder_name)):
+            os.makedirs(folder_name)
+                
         img1 = input_transform(im1_raw)
         img2 = input_transform(im2_raw)
+
+        imwrite((folder_name + '/1.png'), img1)
+        imwrite((folder_name + '/2.png'), img2)
+
         input_var = torch.cat([img1, img2]).unsqueeze(0)
 
         if args.bidirectional:
@@ -104,6 +115,10 @@ def main():
         input_var = input_var.to(device)
         # compute output
         output = model(input_var)
+
+        warped_img = image_warp(img1, output[-1])
+        imwrite((folder_name + '/warped_img.png'), warped_img)
+
         if args.upsampling is not None:
             output = F.interpolate(output, size=img1.size()[-2:], mode=args.upsampling, align_corners=False)
         for suffix, flow_output in zip(['flow', 'inv_flow'], output):
