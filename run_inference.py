@@ -5,6 +5,7 @@ import torch
 import torch.backends.cudnn as cudnn
 import torch.nn.functional as F
 import models
+from models import FlowNetC_vae
 from tqdm import tqdm
 
 import torchvision.transforms as transforms
@@ -12,6 +13,7 @@ import flow_transforms
 from imageio import imread, imwrite
 import numpy as np
 from util import flow2rgb
+import pdb
 
 model_names = sorted(name for name in models.__dict__
                      if name.islower() and not name.startswith("__"))
@@ -39,7 +41,6 @@ parser.add_argument('--bidirectional', action='store_true', help='if set, will o
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
-import pdb
 @torch.no_grad()
 def main():
     global args, save_path
@@ -79,7 +80,9 @@ def main():
     # create model
     network_data = torch.load(args.pretrained)
     print("=> using pre-trained model '{}'".format(network_data['arch']))
-    model = models.__dict__[network_data['arch']](network_data).to(device)
+    # model = models.__dict__[network_data['arch']](network_data).to(device)
+    model = FlowNetC_vae.FlowNetC_vae()
+    model = torch.nn.DataParallel(model).cuda()
     model.eval()
     cudnn.benchmark = True
 
