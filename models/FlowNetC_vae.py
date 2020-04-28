@@ -1,19 +1,19 @@
 import torch
 import torch.nn as nn
 from torch.nn.init import kaiming_normal_, constant_
-from .util import conv, predict_flow, deconv, crop_like, correlate
+from .util import conv, predict_flow, deconv, crop_like, correlate, linear, conv_no_activ
 import pdb
 __all__ = [
     'flownetc', 'flownetc_bn'
 ]
 
 
-class FlowNetC(nn.Module):
+class FlowNetC_vae(nn.Module):
     expansion = 1
 
-    def __init__(self,batchNorm=True):
-        super(FlowNetC,self).__init__()
-
+    def __init__(self,batchNorm=True, latent_size=50):
+        super().__init__()
+        self.latent_size = latent_size
         self.batchNorm = batchNorm
         self.conv1      = conv(self.batchNorm,   3,   64, kernel_size=7, stride=2)
         self.conv2      = conv(self.batchNorm,  64,  128, kernel_size=5, stride=2)
@@ -27,6 +27,7 @@ class FlowNetC(nn.Module):
         self.conv5_1 = conv(self.batchNorm, 512,  512)
         self.conv6   = conv(self.batchNorm, 512, 1024, stride=2)
         self.conv6_1 = conv(self.batchNorm,1024, 1024)
+        self.noise_params_layer = conv_no_activ(False, 194, 2*194, kernel_size=1, stride=1)
 
         self.deconv5 = deconv(1024,512)
         self.deconv4 = deconv(1026,256)
@@ -37,6 +38,8 @@ class FlowNetC(nn.Module):
         self.predict_flow5 = predict_flow(1026)
         self.predict_flow4 = predict_flow(770)
         self.predict_flow3 = predict_flow(386)
+        # self.variational_encoder_layer = linear(194*80*112,2*self.latent_size)
+        # self.variational_decoder_layer = linear(self.latent_size,194*80*112)
         self.predict_flow2 = predict_flow(194)
 
         self.upsampled_flow6_to_5 = nn.ConvTranspose2d(2, 2, 4, 2, 1, bias=False)
@@ -52,6 +55,17 @@ class FlowNetC(nn.Module):
             elif isinstance(m, nn.BatchNorm2d):
                 constant_(m.weight, 1)
                 constant_(m.bias, 0)
+    
+    def get_noise_sample_map(self,input_map, noise_params_layer):
+        noise_parmas = noise_params_layer(input_map)
+        latent_size = noise_parmas.shape[1]//2
+        mean, logvar = noise_parmas[:,0:latent_size], noise_parmas[:, latent_size:]
+
+        with torch.no_grad():
+            tau = torch.randn_like(logvar).to(logvar.device)
+        sampled_map = mean + tau*torch.exp(0.5*logvar)
+
+        return sampled_map, mean.view(mean.size(0),-1), logvar.view(logvar.size(0), -1)
 
     def forward(self, x):
         x1 = x[:,:3]
@@ -89,15 +103,19 @@ class FlowNetC(nn.Module):
         out_deconv3 = crop_like(self.deconv3(concat4), out_conv3)
 
         concat3 = torch.cat((out_conv3,out_deconv3,flow4_up),1)
+
         flow3       = self.predict_flow3(concat3)
         flow3_up    = crop_like(self.upsampled_flow3_to_2(flow3), out_conv2a)
         out_deconv2 = crop_like(self.deconv2(concat3), out_conv2a)
 
         concat2 = torch.cat((out_conv2a,out_deconv2,flow3_up),1)
-        flow2 = self.predict_flow2(concat2)
+        
+        sampled_map2, mean, logvar = self.get_noise_sample_map(concat2, 
+                                                        self.noise_params_layer,)
+        flow2 = self.predict_flow2(sampled_map2)
 
         if self.training:
-            return flow2,flow3,flow4,flow5,flow6
+            return flow2,flow3,flow4,flow5,flow6, mean, logvar
         else:
             return flow2
 

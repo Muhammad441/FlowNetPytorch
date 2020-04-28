@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
-
-
+from util import *
+import pdb
 def EPE(input_flow, target_flow, sparse=False, mean=True):
     EPE_map = torch.norm(target_flow-input_flow,2,1)
     batch_size = EPE_map.size(0)
@@ -53,6 +53,28 @@ def multiscaleEPE(network_output, target_flow, weights=None, sparse=False):
         loss += weight * one_scale(output, target_flow, sparse)
     return loss
 
+def recons_loss(flows, input, weights=None, sparse=False):
+    def one_scale(flow, target, sparse):
+        b, _, h, w = flow.size()
+
+        if sparse:
+            target_scaled = sparse_max_pool(target, (h, w))
+        else:
+            target_scaled = F.interpolate(target, (h, w), mode='area')
+        im1 = target_scaled[:,0:3]
+        im2 = target_scaled[:,3:]
+        pred = image_warp(im1, flow)
+        return F.mse_loss(pred, im2)
+
+    if type(flows) not in [tuple, list]:
+        flows = [flows]
+    if weights is None:
+        weights = [0.005, 0.01, 0.02, 0.08, 0.32]  # as in original article
+    assert(len(weights) == len(flows))
+    loss = 0
+    for flow, weight in zip(flows, weights):
+        loss += weight * one_scale(flow, input, sparse)
+    return loss
 
 def realEPE(output, target, sparse=False):
     b, _, h, w = target.size()

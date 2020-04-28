@@ -24,6 +24,42 @@ def conv(batchNorm, in_planes, out_planes, kernel_size=3, stride=1):
             nn.LeakyReLU(0.1,inplace=True)
         )
 
+def conv_no_activ(batchNorm, in_planes, out_planes, kernel_size=3, stride=1):
+    if batchNorm:
+        return nn.Sequential(
+            nn.Conv2d(in_planes, out_planes, kernel_size=kernel_size, stride=stride, padding=(kernel_size-1)//2, bias=False),
+            nn.BatchNorm2d(out_planes),
+        )
+    else:
+        return nn.Sequential(
+            nn.Conv2d(in_planes, out_planes, kernel_size=kernel_size, stride=stride, padding=(kernel_size-1)//2, bias=True),
+        )
+
+def linear(in_dim, out_dim, batchNorm=False, activation=None):
+    if batchNorm:
+        if activation:
+            return nn.Sequential(
+                    nn.Linear(in_dim, out_dim),
+                    nn.BatchNorm1d(latent_size),
+                    nn.LeakyReLU(0.1,inplace=True)
+                    ) 
+        else:
+            return nn.Sequential(
+                    nn.Linear(in_dim, out_dim),
+                    nn.BatchNorm1d(latent_size),
+                    ) 
+    else:
+        if activation:
+            return nn.Sequential(
+                    nn.Linear(in_dim, out_dim),
+                    nn.LeakyReLU(0.1,inplace=True)
+                    ) 
+        else:
+            return nn.Sequential(
+                    nn.Linear(in_dim, out_dim),
+                    ) 
+
+
 
 def predict_flow(in_planes):
     return nn.Conv2d(in_planes,2,kernel_size=3,stride=1,padding=1,bias=False)

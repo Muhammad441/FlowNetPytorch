@@ -39,7 +39,7 @@ parser.add_argument('--bidirectional', action='store_true', help='if set, will o
 
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
-
+import pdb
 @torch.no_grad()
 def main():
     global args, save_path
@@ -69,9 +69,9 @@ def main():
 
     img_pairs = []
     for ext in args.img_exts:
-        test_files = data_dir.files('*1.{}'.format(ext))
+        test_files = data_dir.files('*0.{}'.format(ext))
         for file in test_files:
-            img_pair = file.parent / (file.namebase[:-1] + '2.{}'.format(ext))
+            img_pair = file.parent / (file.namebase[:-1] + '1.{}'.format(ext))
             if img_pair.isfile():
                 img_pairs.append([file, img_pair])
 
@@ -85,11 +85,12 @@ def main():
 
     if 'div_flow' in network_data.keys():
         args.div_flow = network_data['div_flow']
-
+    
     for (img1_file, img2_file) in tqdm(img_pairs):
-
-        img1 = input_transform(imread(img1_file))
-        img2 = input_transform(imread(img2_file))
+        im1_raw = imread(img1_file)
+        im2_raw = imread(img2_file)
+        img1 = input_transform(im1_raw)
+        img2 = input_transform(im2_raw)
         input_var = torch.cat([img1, img2]).unsqueeze(0)
 
         if args.bidirectional:

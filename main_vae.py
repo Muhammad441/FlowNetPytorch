@@ -11,6 +11,7 @@ import torch.utils.data
 import torchvision.transforms as transforms
 import flow_transforms
 import models
+from models import FlowNetC_vae
 import datasets
 from multiscaleloss import multiscaleEPE, realEPE, recons_loss
 import datetime
@@ -163,7 +164,8 @@ def main():
         network_data = None
         print("=> creating model '{}'".format(args.arch))
 
-    model = models.__dict__[args.arch](network_data).cuda()
+    # model = models.__dict__[args.arch](network_data).cuda()
+    model = FlowNetC_vae.FlowNetC_vae()
     model = torch.nn.DataParallel(model).cuda()
     cudnn.benchmark = True
 
@@ -183,11 +185,11 @@ def main():
         return
 
     scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.milestones, gamma=0.5)
-
+    wt_KL = 0.0
     for epoch in range(args.start_epoch, args.epochs):
-
+        wt_KL = epoch/(args.epochs)
         # train for one epoch
-        train_loss, train_EPE = train(train_loader, model, optimizer, epoch, train_writer)
+        train_loss, train_EPE = train(train_loader, model, optimizer, epoch, train_writer, wt_KL)
         scheduler.step()
         train_writer.add_scalar('mean EPE', train_EPE, epoch)
 
@@ -211,7 +213,7 @@ def main():
         }, is_best, save_path)
 
 import pdb
-def train(train_loader, model, optimizer, epoch, train_writer):
+def train(train_loader, model, optimizer, epoch, train_writer, wt_KL):
     global n_iter, args
     batch_time = AverageMeter()
     data_time = AverageMeter()
@@ -224,7 +226,7 @@ def train(train_loader, model, optimizer, epoch, train_writer):
     model.train()
 
     end = time.time()
-
+    wt_KL = 1.0
     for i, (input, target) in enumerate(train_loader):
         # measure data loading time
         data_time.update(time.time() - end)
@@ -232,7 +234,13 @@ def train(train_loader, model, optimizer, epoch, train_writer):
         input = torch.cat(input,1).to(device)
 
         # compute output
-        output = model(input)
+        vae_output = model(input)
+        output = vae_output[0:-2]
+        mean, logvar = vae_output[-2], vae_output[-1]
+
+        loss_KLD = -1.0 * torch.mean(1 + logvar - mean*mean - torch.exp(logvar))
+        train_writer.add_scalar('kld_loss', loss_KLD.item(), n_iter)
+        
         if args.sparse:
             # Since Target pooling is not very precise when sparse,
             # take the highest resolution prediction and upsample it instead of downsampling target
@@ -243,10 +251,11 @@ def train(train_loader, model, optimizer, epoch, train_writer):
         flow2_EPE = args.div_flow * realEPE(output[0], target, sparse=args.sparse)
         # record loss and EPE
         losses.update(loss.item(), target.size(0))
-        train_writer.add_scalar('train_loss', loss.item(), n_iter)
+        train_writer.add_scalar('recons_loss', loss.item(), n_iter)
         flow2_EPEs.update(flow2_EPE.item(), target.size(0))
 
         # compute gradient and do optimization step
+        loss += wt_KL*loss_KLD 
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
@@ -256,9 +265,9 @@ def train(train_loader, model, optimizer, epoch, train_writer):
         end = time.time()
 
         if i % args.print_freq == 0:
-            print('Epoch: [{0}][{1}/{2}]\t Time {3}\t Data {4}\t Loss {5}\t EPE {6}'
+            print('Epoch: [{0}][{1}/{2}]\t Time {3}\t Data {4}\t Loss {5}\t Loss_KLD {6}\t EPE {7}'
                   .format(epoch, i, epoch_size, batch_time,
-                          data_time, losses, flow2_EPEs))
+                          data_time, losses, loss_KLD.item(),flow2_EPEs))
         n_iter += 1
         if i >= epoch_size:
             break
@@ -279,7 +288,6 @@ def validate(val_loader, model, epoch, output_writers):
     for i, (input, target) in enumerate(val_loader):
         target = target.to(device)
         input = torch.cat(input,1).to(device)
-
         # compute output
         output = model(input)
         flow2_EPE = args.div_flow*realEPE(output, target, sparse=args.sparse)
